@@ -1,36 +1,50 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Shop App
 
-## Getting Started
+Shop management for repair shops, sold as a subscription. Three levels of access:
 
-First, run the development server:
+- **Platform owner** sells subscriptions and sees each shop's plan, status and seats.
+- **Shop admin** is the subscriber and manages the shop's team and roles.
+- **Team members** get one role each; the role decides what they can see and do.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+This repository currently holds **build slice 1, Foundation**. The full plan is in the build brief (twelve slices).
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## What works in this slice
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- Google sign-in (Firebase Authentication).
+- Create a shop. The server creates the shop on a trial, the four default roles (shop admin, service writer, technician, parts manager), the first member, an audit log entry, and sets the user's `shopId` and `roleId` on their sign-in token.
+- App shell with the shop menu (filtered by role) and the platform owner menu.
+- Team and roles page showing the permission sheet (read-only for now).
+- Platform owner page listing shops.
+- Every other menu item opens a placeholder naming the slice that builds it.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Security model
 
-## Learn More
+- Everything a shop owns lives under `shops/{shopId}`.
+- `shopId`, `roleId` and `superAdmin` are custom claims set only by server code. The browser cannot change them.
+- `firestore.rules` is default-deny. A user reaches only the shop in their token; a past-due shop is read-only; a suspended or cancelled shop is locked.
+- Shop creation, membership, plan, status, seats and the audit log are written by the server only.
+- The shop admin role cannot be edited or deleted, so a shop cannot lock itself out.
+- The platform owner sees subscription facts, not shop records.
+- Hiding a menu item is for convenience. The rules and server routes are the protection.
 
-To learn more about Next.js, take a look at the following resources:
+## Setup
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. Copy `.env.example` to `.env.local` and fill in the Firebase values.
+2. In the Firebase console, enable Google as a sign-in provider and create a Firestore database.
+3. Deploy the rules: `npx firebase deploy --only firestore:rules --project <your-project>`.
+4. `npm install`, then `npm run dev`.
+5. To make yourself the platform owner, sign in once, then run `node scripts/set-super-admin.mjs you@example.com` and sign in again.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Do not edit rules in the Firebase console; change `firestore.rules` here so the tests keep covering them.
 
-## Deploy on Vercel
+## Checks
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+| Command | What it does |
+| --- | --- |
+| `npm run typecheck` | TypeScript |
+| `npm run lint` | ESLint |
+| `npm test` | Unit tests (rule tests are skipped without the emulator) |
+| `npm run test:rules` | Security rule tests in the Firestore emulator (needs Java) |
+| `npm run build` | Production build |
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+GitHub Actions runs all five on every push.

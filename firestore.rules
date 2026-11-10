@@ -1,0 +1,116 @@
+rules_version = '2';
+
+// Shop App security rules.
+//
+// Default is deny. Every shop's data lives under shops/{shopId}, and a user
+// can only reach the shop named in their sign-in token. The token's shopId,
+// roleId and superAdmin values are set by the server only (see
+// src/app/api/shops/route.ts); a browser cannot change them.
+//
+// Anything not listed here is denied to browsers and is written by server
+// routes with the Admin SDK, which checks permissions itself.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+    function isSuper() {
+      return signedIn() && request.auth.token.superAdmin == true;
+    }
+    function inShop(shopId) {
+      return signedIn() && request.auth.token.shopId == shopId;
+    }
+    function shop(shopId) {
+      return get(/databases/$(database)/documents/shops/$(shopId)).data;
+    }
+    // Suspended and cancelled shops are locked; past-due shops are read-only.
+    function readable(shopId) {
+      return inShop(shopId) && shop(shopId).status in ['trial', 'active', 'pastDue'];
+    }
+    function writable(shopId) {
+      return inShop(shopId) && shop(shopId).status in ['trial', 'active'];
+    }
+    function role(shopId) {
+      return get(/databases/$(database)/documents/shops/$(shopId)/roles/$(request.auth.token.roleId)).data;
+    }
+    function can(shopId, key) {
+      return role(shopId).permissions[key] == true;
+    }
+    function permissionKeys() {
+      return ['ordersView', 'ordersEdit', 'pricesView', 'pricesEdit', 'customersView',
+              'customersEdit', 'paymentsTake', 'paymentsRefund', 'inventoryView',
+              'inventoryEdit', 'purchasingView', 'purchasingEdit', 'timeOwn', 'timeAll',
+              'timeEdit', 'reportsView', 'teamManage', 'settingsManage', 'auditView',
+              'assistantUse'];
+    }
+    function validRole(data) {
+      let p = data.permissions;
+      return data.keys().hasOnly(['name', 'description', 'system', 'permissions', 'createdAt', 'updatedAt'])
+        && data.keys().hasAll(['name', 'description', 'system', 'permissions'])
+        && data.name is string && data.name.size() >= 2 && data.name.size() <= 40
+        && data.description is string && data.description.size() <= 200
+        && data.system is bool
+        && p is map
+        && p.keys().hasOnly(permissionKeys()) && p.keys().hasAll(permissionKeys())
+        && p.ordersView in ['all', 'assigned', 'none']
+        && p.customersView in ['full', 'nameOnly', 'none']
+        && p.reportsView in ['all', 'sales', 'inventory', 'none']
+        && p.ordersEdit is bool && p.pricesView is bool && p.pricesEdit is bool
+        && p.customersEdit is bool && p.paymentsTake is bool && p.paymentsRefund is bool
+        && p.inventoryView is bool && p.inventoryEdit is bool && p.purchasingView is bool
+        && p.purchasingEdit is bool && p.timeOwn is bool && p.timeAll is bool
+        && p.timeEdit is bool && p.teamManage is bool && p.settingsManage is bool
+        && p.auditView is bool && p.assistantUse is bool;
+    }
+
+    match /shops/{shopId} {
+      // A member can always read their own shop's summary, so a locked shop
+      // can show why it is locked. The platform owner sees subscriptions.
+      allow get: if inShop(shopId) || isSuper();
+      allow list: if isSuper();
+      // Plan, status and seats are changed by the server only.
+      allow write: if false;
+
+      match /members/{uid} {
+        allow read: if readable(shopId);
+        // Invites, role changes and removals go through the server so the
+        // sign-in token and the seat limit stay in step.
+        allow write: if false;
+      }
+
+      match /roles/{roleId} {
+        allow read: if readable(shopId);
+        // The shop admin role can never be changed or removed, so a shop
+        // cannot lock itself out. System roles keep their system flag.
+        allow create: if writable(shopId) && can(shopId, 'teamManage')
+          && roleId != 'admin'
+          && validRole(request.resource.data)
+          && request.resource.data.system == false;
+        allow update: if writable(shopId) && can(shopId, 'teamManage')
+          && roleId != 'admin'
+          && validRole(request.resource.data)
+          && request.resource.data.system == resource.data.system;
+        allow delete: if writable(shopId) && can(shopId, 'teamManage')
+          && roleId != 'admin'
+          && resource.data.system == false;
+      }
+
+      match /auditLog/{entryId} {
+        allow read: if readable(shopId) && can(shopId, 'auditView');
+        // Append-only, and only the server appends.
+        allow write: if false;
+      }
+
+      match /supportAccess/{grantId} {
+        allow read: if (readable(shopId) && can(shopId, 'settingsManage')) || isSuper();
+        allow write: if false;
+      }
+    }
+
+    match /platform/{document=**} {
+      allow read: if isSuper();
+      allow write: if false;
+    }
+  }
+}
