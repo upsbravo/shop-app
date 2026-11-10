@@ -125,11 +125,14 @@ describe.skipIf(!emulator)("firestore.rules", () => {
       await assertFails(updateDoc(doc(db, "shops", "alpha", "roles", "admin"), { name: "Owner" }));
       await assertFails(deleteDoc(doc(db, "shops", "alpha", "roles", "admin")));
     });
-    it("system roles cannot be deleted or have their system flag removed", async () => {
+    it("nobody can mark a role as a system role", async () => {
       const db = adminOf("alpha");
-      await assertFails(deleteDoc(doc(db, "shops", "alpha", "roles", "technician")));
-      await assertFails(updateDoc(doc(db, "shops", "alpha", "roles", "technician"), { system: false }));
+      await assertFails(updateDoc(doc(db, "shops", "alpha", "roles", "technician"), { system: true }));
       await assertFails(setDoc(doc(db, "shops", "alpha", "roles", "fake"), { ...customRole, system: true }));
+    });
+    it("the starter roles other than shop admin can be edited", async () => {
+      const db = adminOf("alpha");
+      await assertSucceeds(updateDoc(doc(db, "shops", "alpha", "roles", "technician"), { "permissions.inventoryView": true }));
     });
     it("rejects malformed roles", async () => {
       const db = adminOf("alpha");
